@@ -33,6 +33,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+// mongodb::error::Error
+
 pub async fn new_client() -> Result<Client, Box<dyn Error>> {
     let client_uri =
          "mongodb+srv://topheruk:VsNSZ28UcbGYJhw2@cluster0.pkfdw.mongodb.net/local?retryWrites=true&w=majority";
@@ -45,6 +47,9 @@ pub async fn new_client() -> Result<Client, Box<dyn Error>> {
 
     Ok(client)
 }
+
+// mongodb::error::Error
+// bson::de::error::Error
 
 pub async fn aggregate(movies: &Collection<Document>) -> Result<(), Box<dyn Error>> {
     let stage_match_title = doc! {"$match": {"title": "A Star Is Born"}};
@@ -62,6 +67,9 @@ pub async fn aggregate(movies: &Collection<Document>) -> Result<(), Box<dyn Erro
 
     Ok(())
 }
+
+// bson::ser::error::Error
+// mongodb::error::Error
 
 pub async fn insert_one(movies: &Collection<Document>) -> Result<ObjectId, Box<dyn Error>> {
     let parasite = bson::to_bson(
@@ -86,6 +94,9 @@ pub async fn insert_one(movies: &Collection<Document>) -> Result<ObjectId, Box<d
     Ok(result_id)
 }
 
+// bson::de::error::Error
+// mongodb::error::Error
+
 pub async fn find_one(
     movies: &Collection<Document>,
     result_id: ObjectId,
@@ -94,11 +105,16 @@ pub async fn find_one(
         .find_one(Some(doc! { "_id":  result_id.clone() }), None)
         .await?
         .expect("Document not found");
+
     let loaded_movie_struct = bson::from_bson::<Movie>(Bson::Document(movie))?;
+
     println!("Movie loaded from collection: {:?}", loaded_movie_struct);
 
     Ok(loaded_movie_struct)
 }
+
+// bson::ser::error::Error
+// mongodb::error::Error
 
 pub async fn update_one(
     movies: &Collection<Document>,
@@ -119,6 +135,8 @@ pub async fn update_one(
             None,
         )
         .await?;
+
     println!("Updated {} document", update_result.modified_count);
+
     Ok(())
 }
