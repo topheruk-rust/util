@@ -22,6 +22,7 @@ pub struct MovieSummary {
     pub cast: Vec<String>,
     pub year: i32,
 }
+
 impl fmt::Display for MovieSummary {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
