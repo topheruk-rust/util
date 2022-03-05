@@ -1,7 +1,7 @@
 use actix_web::{
     get,
     web::{Json, Path},
-    Responder, Result,
+    Result,
 };
 
 use serde::Serialize;
@@ -9,6 +9,11 @@ use serde::Serialize;
 #[derive(Serialize)]
 pub struct MyObj {
     pub name: String,
+}
+
+#[get("/ping")]
+pub async fn ping() -> String {
+    "ping".to_string()
 }
 
 #[get("/a/{name}")]
