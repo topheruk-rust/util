@@ -1,18 +1,21 @@
-use actix_web::{get, post, web::Data, HttpResponse, Responder};
+use actix_web::{
+    get,
+    web::{Json, Path},
+    Responder, Result,
+};
 
-use crate::app::database::AppState;
+use serde::Serialize;
 
-#[get("/")]
-pub async fn hello(data: Data<AppState>) -> String {
-    let app_name = &data.app_name;
-    format!("Hello, {}!", app_name)
+#[derive(Serialize)]
+pub struct MyObj {
+    pub name: String,
 }
 
-#[post("/echo")]
-pub async fn echo(req_body: String) -> impl Responder {
-    HttpResponse::Ok().body(req_body)
-}
+#[get("/a/{name}")]
+pub async fn json(name: Path<String>) -> Result<Json<MyObj>> {
+    let obj = MyObj {
+        name: name.to_string(),
+    };
 
-pub async fn manual_hello() -> impl Responder {
-    HttpResponse::Ok().body("Hey there!")
+    Ok(Json(obj))
 }
