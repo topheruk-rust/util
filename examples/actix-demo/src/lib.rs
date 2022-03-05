@@ -1,10 +1,14 @@
-use actix_web::{web::{ServiceConfig, self}, Resource};
+use actix_web::{web::{ServiceConfig, self, resource}, Resource};
 use handler::index;
 
 mod handler;
 
 pub fn app_config(config: &mut ServiceConfig) {
-    config.route("/hello", web::get().to(index));
+    config
+        .service(
+            resource("/hello")
+            .route(web::get().to(index))
+        );
 }
 
 #[cfg(test)]
@@ -82,11 +86,11 @@ mod tests {
                 status: StatusCode::NOT_FOUND,
                 method: Method::GET,
             },
-            // TestCase {
-            //     path: "/hello",
-            //     status: StatusCode::METHOD_NOT_ALLOWED,
-            //     method: Method::POST,
-            // },
+            TestCase {
+                path: "/hello",
+                status: StatusCode::METHOD_NOT_ALLOWED,
+                method: Method::POST,
+            },
         ];
 
         for tc in tt {

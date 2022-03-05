@@ -5,6 +5,7 @@ use handler::*;
 use rocket::{routes, Build};
 
 mod handler;
+mod middleware;
 
 pub fn rocket() -> rocket::Rocket<Build> {
     rocket::build().mount("/", routes![world])
