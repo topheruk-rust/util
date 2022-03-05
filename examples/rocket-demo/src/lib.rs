@@ -1,18 +1,22 @@
-#![feature(decl_macro)]
+#[macro_use]
+extern crate rocket;
+
 use handler::*;
-use rocket::routes;
+use rocket::{routes, Build};
 
 mod handler;
 
-pub fn rocket() -> rocket::Rocket {
-    rocket::ignite().mount("/", routes![world])
+pub fn rocket() -> rocket::Rocket<Build> {
+    rocket::build().mount("/", routes![world])
 }
 
 #[cfg(test)]
 mod tests {
     use super::rocket;
-    use rocket::http::{Method, Status};
-    use rocket::local::Client;
+    use rocket::{
+        http::{Method, Status},
+        local::blocking::Client,
+    };
 
     struct TestCase {
         path: &'static str,
@@ -22,7 +26,7 @@ mod tests {
 
     #[test]
     fn test_get_world() {
-        let client = Client::new(rocket()).expect("valid rocket instance");
+        let client = Client::tracked(rocket()).expect("valid rocket instance");
 
         let response = client.get("/world").dispatch();
         assert_eq!(response.status(), Status::Ok);
@@ -30,7 +34,7 @@ mod tests {
 
     #[test]
     fn test_get_error() {
-        let client = Client::new(rocket()).expect("valid rocket instance");
+        let client = Client::tracked(rocket()).expect("valid rocket instance");
 
         let response = client.get("/404").dispatch();
         assert_eq!(response.status(), Status::NotFound);
@@ -38,7 +42,7 @@ mod tests {
 
     #[test]
     fn test_post_world() {
-        let client = Client::new(rocket()).expect("valid rocket instance");
+        let client = Client::tracked(rocket()).expect("valid rocket instance");
 
         let response = client.post("/world").dispatch();
         assert_eq!(response.status(), Status::MethodNotAllowed);
@@ -46,7 +50,7 @@ mod tests {
 
     #[test]
     fn test_app() {
-        let client = Client::new(rocket()).expect("valid rocket instance");
+        let client = Client::tracked(rocket()).expect("valid rocket instance");
 
         let tt = vec![
             TestCase {
