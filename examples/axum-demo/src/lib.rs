@@ -9,7 +9,7 @@ mod model {
 
     pub type Database = Arc<RwLock<HashMap<Uuid, Todo>>>;
 
-    #[derive(Debug, Serialize, Clone)]
+    #[derive(Serialize, Clone)]
     pub struct Todo {
         pub id: Uuid,
         pub text: String,
@@ -32,12 +32,12 @@ mod model {
         }
     }
 
-    #[derive(Debug, Deserialize, Serialize)]
+    #[derive(Deserialize)]
     pub struct TodoDto {
         pub text: String,
     }
 
-    #[derive(Debug, Deserialize, Default)]
+    #[derive(Deserialize, Default)]
     pub struct Pagination {
         pub page: usize,
         pub per_page: usize,
@@ -46,16 +46,23 @@ mod model {
 
 mod handler {
     use axum::{
-        extract::{Extension, Path, Query},
+        extract::{Extension, Query},
         http::StatusCode,
         response::IntoResponse,
         Json,
     };
+    use axum_extra::routing::TypedPath;
+    use serde::Deserialize;
     use uuid::Uuid;
 
     use crate::model::{Database, Pagination, Todo, TodoDto};
 
+    #[derive(Deserialize, TypedPath)]
+    #[typed_path("/todos/")]
+    pub struct TodosCollection;
+
     pub async fn todos_index(
+        _: TodosCollection,
         Query(Pagination { page, per_page }): Query<Pagination>,
         Extension(db): Extension<Database>,
     ) -> impl IntoResponse {
@@ -68,10 +75,11 @@ mod handler {
             .cloned()
             .collect::<Vec<_>>();
 
-        (StatusCode::OK, Json(todos))
+        Json(todos)
     }
 
     pub async fn todos_create(
+        _: TodosCollection,
         Json(input): Json<TodoDto>,
         Extension(db): Extension<Database>,
     ) -> impl IntoResponse {
@@ -82,8 +90,14 @@ mod handler {
         (StatusCode::CREATED, Json(todo))
     }
 
+    #[derive(Deserialize, TypedPath)]
+    #[typed_path("/todos/:id")]
+    pub struct TodosMember {
+        id: Uuid,
+    }
+
     pub async fn todos_delete(
-        Path(id): Path<Uuid>,
+        TodosMember { id }: TodosMember,
         Extension(db): Extension<Database>,
     ) -> impl IntoResponse {
         if let Some(_) = db.write().unwrap().remove(&id) {
@@ -94,11 +108,8 @@ mod handler {
     }
 }
 
-use axum::{
-    extract::Extension,
-    routing::{delete, get},
-    Router,
-};
+use axum::{extract::Extension, Router};
+use axum_extra::routing::RouterExt;
 use handler::{todos_create, todos_delete, todos_index};
 use model::Database;
 use tower::ServiceBuilder;
@@ -108,8 +119,9 @@ pub fn app() -> Router {
     let db = Database::default();
 
     Router::new()
-        .route("/todos/", get(todos_index).post(todos_create))
-        .route("/todos/:id", delete(todos_delete))
+        .typed_get(todos_index)
+        .typed_post(todos_create)
+        .typed_delete(todos_delete)
         .layer(
             ServiceBuilder::new()
                 .layer(TraceLayer::new_for_http())
@@ -120,13 +132,8 @@ pub fn app() -> Router {
 
 #[cfg(test)]
 mod tests {
-    use crate::model::TodoDto;
-
     use super::*;
-    use axum::{
-        body::Body,
-        http::{self, Method, Request, StatusCode},
-    };
+    use axum::http::{header, Method, Request, StatusCode};
     use serde_json::json;
     use tower::ServiceExt; // for `app.oneshot()`
 
@@ -135,9 +142,9 @@ mod tests {
             #[tokio::test]
             async fn $n() {
                 let app = app();
-                let resp = app.oneshot($req.unwrap()).await.unwrap();
+                let res = app.oneshot($req.unwrap()).await.unwrap();
 
-                assert_eq!(resp.status(), $sc);
+                assert_eq!(res.status(), $sc);
             }
         };
     }
@@ -147,37 +154,12 @@ mod tests {
         Request::builder()
             .method(Method::POST)
             .uri("/todos/")
-            .header(http::header::CONTENT_TYPE, mime::APPLICATION_JSON.as_ref())
-            .body(Body::from(
-                serde_json::to_vec(&json!({"text":"Hello, World"})).unwrap(),
-            )),
+            .header(header::CONTENT_TYPE, mime::APPLICATION_JSON.as_ref())
+            .body(
+                serde_json::to_vec(&json!({"text":"Hello, World"}))
+                    .unwrap()
+                    .into(),
+            ),
         StatusCode::CREATED
     );
-
-    // test_endpoint!(
-    //     case_2,
-    //     Request::builder()
-    //         .method(Method::POST)
-    //         .uri("/")
-    //         .body(Body::empty()),
-    //     StatusCode::METHOD_NOT_ALLOWED
-    // );
-
-    // test_endpoint!(
-    //     case_3,
-    //     Request::builder().uri("/404").body(Body::empty()),
-    //     StatusCode::NOT_FOUND
-    // );
-
-    // test_endpoint!(
-    //     case_4,
-    //     Request::builder()
-    //         .method(http::Method::POST)
-    //         .uri("/json")
-    //         .header(http::header::CONTENT_TYPE, mime::APPLICATION_JSON.as_ref())
-    //         .body(Body::from(
-    //             serde_json::to_vec(&json!([1, 2, 3, 4])).unwrap(),
-    //         )),
-    //     StatusCode::OK
-    // );
 }
