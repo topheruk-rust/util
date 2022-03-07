@@ -58,7 +58,7 @@ pub async fn new_client() -> Result<Client> {
     Ok(client)
 }
 
-pub async fn aggregate(movies: &Collection<Document>) -> result::Result<(), mongodb::error::Error> {
+pub async fn aggregate(movies: &Collection<Document>) -> Result<()> {
     let stage_match_title = doc! {"$match": {"title": "A Star Is Born"}};
 
     let stage_sort_year_ascending = doc! {"$sort": { "year": 1 }};
@@ -75,10 +75,7 @@ pub async fn aggregate(movies: &Collection<Document>) -> result::Result<(), mong
     Ok(())
 }
 
-pub async fn insert_one(
-    movies: &Collection<Document>,
-    movie: &Movie,
-) -> result::Result<ObjectId, mongodb::error::Error> {
+pub async fn insert_one(movies: &Collection<Document>, movie: &Movie) -> Result<ObjectId> {
     let parasite = bson::to_bson(movie)?;
 
     let document = parasite.as_document().unwrap(); // safe to unwrap
@@ -93,10 +90,7 @@ pub async fn insert_one(
     Ok(result_id)
 }
 
-pub async fn find_one(
-    movies: &Collection<Document>,
-    result_id: ObjectId,
-) -> result::Result<Movie, mongodb::error::Error> {
+pub async fn find_one(movies: &Collection<Document>, result_id: ObjectId) -> Result<Movie> {
     let movie = movies
         .find_one(Some(doc! { "_id":  result_id.clone() }), None)
         .await?
@@ -109,25 +103,15 @@ pub async fn find_one(
     Ok(loaded_movie_struct)
 }
 
-pub async fn update_one(
-    movies: &Collection<Document>,
-    movie: &Movie,
-) -> result::Result<(), mongodb::error::Error> {
+pub async fn update_one(movies: &Collection<Document>, movie: &Movie) -> Result<()> {
     let serialized_movie_id = bson::to_bson(&movie.id)?
         .as_object_id()
         .expect("Retrieved _id should have been of type ObjectId"); // FIXME: no panic
 
-    let update_result = movies
-        .update_one(
-            doc! {
-               "_id": serialized_movie_id
-            },
-            doc! {
-               "$set": { "year": 2019 }
-            },
-            None,
-        )
-        .await?;
+    let query_id = doc! {"_id":serialized_movie_id};
+    let query_set = doc! {"$set":{"year":2019}};
+
+    let update_result = movies.update_one(query_id, query_set, None).await?;
 
     println!("Updated {} document", update_result.modified_count);
 
