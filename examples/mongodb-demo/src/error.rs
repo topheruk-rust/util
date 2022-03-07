@@ -22,5 +22,3 @@ impl From<bson::de::Error> for Error {
         Self::Deserialize(e)
     }
 }
-
-// impl std::error::Error for Error {}

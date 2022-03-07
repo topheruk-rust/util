@@ -1,9 +1,43 @@
+mod error {
+    use crate::model;
+
+    pub enum AppError {
+        RepoError(model::RepoError),
+    }
+
+    impl From<model::RepoError> for AppError {
+        fn from(e: model::RepoError) -> Self {
+            Self::RepoError(e)
+        }
+    }
+}
+
 mod model {
+    mod error {
+        pub enum RepoError {
+            NotFound,
+        }
+
+        struct Repo {
+            db: Database,
+        }
+
+        impl Repo {
+            pub fn get(&self, id: Uuid) -> Result<Todo, RepoError> {
+                match self.db.read().unwrap().get(&id) {
+                    Some(todo) => Ok(todo.clone()),
+                    _ => Err(RepoError::NotFound),
+                }
+            }
+        }
+    }
+
     use std::{
         collections::HashMap,
         sync::{Arc, RwLock},
     };
 
+    use axum::async_trait;
     use serde::{Deserialize, Serialize};
     use uuid::Uuid;
 
@@ -21,6 +55,14 @@ mod model {
             Self {
                 id: Uuid::new_v4(),
                 text,
+                completed: false,
+            }
+        }
+
+        pub fn default() -> Self {
+            Self {
+                id: Uuid::default(),
+                text: "".to_string(),
                 completed: false,
             }
         }
@@ -82,7 +124,7 @@ mod handler {
         _: TodosCollection,
         Json(input): Json<TodoDto>,
         Extension(db): Extension<Database>,
-    ) -> impl IntoResponse {
+    ) -> (StatusCode, Json<Todo>) {
         let todo: Todo = input.into();
 
         db.write().unwrap().insert(todo.id, todo.clone());
@@ -112,22 +154,15 @@ use axum::{extract::Extension, Router};
 use axum_extra::routing::RouterExt;
 use handler::{todos_create, todos_delete, todos_index};
 use model::Database;
-use tower::ServiceBuilder;
-use tower_http::trace::TraceLayer;
 
 pub fn app() -> Router {
-    let db = Database::default();
+    let todos_repo = Database::default();
 
     Router::new()
         .typed_get(todos_index)
         .typed_post(todos_create)
         .typed_delete(todos_delete)
-        .layer(
-            ServiceBuilder::new()
-                .layer(TraceLayer::new_for_http())
-                .layer(Extension(db))
-                .into_inner(),
-        )
+        .layer(Extension(todos_repo))
 }
 
 #[cfg(test)]
@@ -137,29 +172,28 @@ mod tests {
     use serde_json::json;
     use tower::ServiceExt; // for `app.oneshot()`
 
-    macro_rules! test_endpoint {
-        ($n:ident, $req:expr, $sc:expr) => {
+    macro_rules! test_post {
+        ($test_name:ident, $uri:expr, $json:expr, $status_code:expr) => {
             #[tokio::test]
-            async fn $n() {
+            async fn $test_name() {
                 let app = app();
-                let res = app.oneshot($req.unwrap()).await.unwrap();
+                let req = Request::builder()
+                    .method(Method::POST)
+                    .uri($uri)
+                    .header(header::CONTENT_TYPE, mime::APPLICATION_JSON.as_ref())
+                    .body(serde_json::to_vec(&$json).unwrap().into())
+                    .unwrap();
 
-                assert_eq!(res.status(), $sc);
+                let res = app.oneshot(req).await.unwrap();
+                assert_eq!(res.status(), $status_code);
             }
         };
     }
 
-    test_endpoint!(
-        case_1,
-        Request::builder()
-            .method(Method::POST)
-            .uri("/todos/")
-            .header(header::CONTENT_TYPE, mime::APPLICATION_JSON.as_ref())
-            .body(
-                serde_json::to_vec(&json!({"text":"Hello, World"}))
-                    .unwrap()
-                    .into(),
-            ),
+    test_post!(
+        case_created,
+        "/todos/",
+        json!({"text":"Hello, World!"}),
         StatusCode::CREATED
     );
 }
