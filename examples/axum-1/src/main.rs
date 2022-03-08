@@ -58,8 +58,6 @@ mod model {
     pub mod user {
         use axum::async_trait;
 
-        use super::repo;
-
         pub mod error {
             use crate::model::repo;
 
@@ -93,7 +91,7 @@ mod model {
         }
 
         #[async_trait]
-        impl Repo<User, UserDto> for UserRepo {
+        impl repo::Repo<User, UserDto> for UserRepo {
             fn find(&self, id: Uuid) -> Result<User, repo::error::Error> {
                 match self.db.iter().find(|&u| u.id == id) {
                     Some(u) => Ok(u.clone()),
@@ -110,7 +108,7 @@ mod model {
         use serde::Deserialize;
         use uuid::Uuid;
 
-        use super::repo::Repo;
+        use super::repo;
 
         #[derive(Debug, Clone)]
         pub struct User {
@@ -146,6 +144,8 @@ mod model {
 
         #[cfg(test)]
         mod test {
+            use crate::model::repo::Repo;
+
             use super::*;
 
             type Result<T> = std::result::Result<T, error::Error>;
