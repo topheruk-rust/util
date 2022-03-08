@@ -1,7 +1,7 @@
 use std::net::SocketAddr;
 
 use axum::{extract::Extension, routing::get, Router, Server};
-use handler::{todos_create, todos_delete, todos_index, todos_member, todos_update};
+use handler::*;
 use model::TodoRepo;
 
 pub mod error {
