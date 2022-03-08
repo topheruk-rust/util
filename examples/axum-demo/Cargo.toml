@@ -8,13 +8,17 @@ edition = "2021"
 [dependencies]
 axum = "0.4.8"
 axum-extra = { version = "0.1.5", features = ["typed-routing"] }
+bson = { version = "2", features = ["chrono-0_4"] } # Needed for using chrono datetime in doc
+chrono = "0.4" # Used for setting DateTimes
+futures = "0.3.13"
+hyper = { version = "0.14", features = ["full"] }
 mime = "0.3"
-tokio = { version = "1.0", features = ["full"] }
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-tower-http = { version = "0.2.0", features = ["trace"] }
-uuid = { version = "0.8", features = ["serde", "v4"] }
+mongodb = "2.1"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-hyper = { version = "0.14", features = ["full"] }
+tokio = { version = "1.0", features = ["full"] }
+tower-http = { version = "0.2.0", features = ["trace"] }
 tower = { version = "0.4", features = ["util", "timeout"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "0.8", features = ["serde", "v4"] }

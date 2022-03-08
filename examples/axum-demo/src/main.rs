@@ -181,6 +181,23 @@ mod database {
         async fn update(&mut self, id: Uuid, dto: U) -> Result<T>;
     }
 
+    pub mod movie {
+        use bson::Document;
+        use mongodb::Collection;
+
+        pub struct MovieRepo {
+            db: Collection<Document>,
+        }
+
+        impl MovieRepo {
+            pub fn new(db: mongodb::Database) -> Self {
+                Self {
+                    db: db.collection_with_options(),
+                }
+            }
+        }
+    }
+
     pub mod todo {
         use std::{
             collections::HashMap,
