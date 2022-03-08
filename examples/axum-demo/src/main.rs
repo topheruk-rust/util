@@ -161,7 +161,7 @@ mod model {
         }
 
         async fn create(&mut self, dto: TodoCreate) -> Result<Uuid> {
-            let todo: Todo = dto.try_into().unwrap(); // FIXME: say no to unwrap!!
+            let todo: Todo = dto.try_into()?; // FIXME: say no to unwrap!!
             let id = todo.id;
 
             let mut todos = self.db.write().unwrap(); // FIXME: say no to unwrap!!
