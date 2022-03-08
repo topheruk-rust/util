@@ -579,7 +579,7 @@ pub mod handler {
     #[derive(Debug, Deserialize, Default)]
     pub struct Pagination {
         pub offset: Option<u32>,
-        pub limit: Option<u32>,
+        pub limit: Option<u32>, // this will be too large
     }
 
     pub async fn movies_index(
@@ -591,6 +591,7 @@ pub mod handler {
         let skip = offset.unwrap_or(0);
         let stage_skip = doc! { "$skip": skip };
 
+        // if number is greater than `MAX` then default
         let limit = limit.unwrap_or(20);
         let stage_limit = doc! { "$limit": limit };
 
