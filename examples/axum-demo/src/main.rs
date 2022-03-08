@@ -1,7 +1,7 @@
 use std::net::SocketAddr;
 
 use axum::{extract::Extension, routing::get, Router, Server};
-use database::TodoRepo;
+use database::todo::TodoRepo;
 use handler::*;
 
 pub mod error {
@@ -56,7 +56,7 @@ mod model {
 
     use self::error::Error;
 
-    pub mod error {
+    pub(crate) mod error {
         #[derive(Debug)]
         pub enum Error {
             Encoding(serde_json::Error),
@@ -95,11 +95,12 @@ mod model {
         type Error = Error;
 
         fn try_from(value: TodoCreate) -> Result<Self> {
-            if value.text.is_empty() {
-                Err(Self::Error::EmptyText)
-            } else {
-                Ok(Self::new(value.text))
-            }
+            let TodoCreate { text } = match value {
+                _ if value.text.is_empty() => Err(Error::EmptyText),
+                _ => Ok(value),
+            }?;
+
+            Ok(Todo::new(text))
         }
     }
 
@@ -148,15 +149,8 @@ mod model {
 }
 
 mod database {
-    use std::{
-        collections::HashMap,
-        sync::{Arc, RwLock},
-    };
-
     use axum::async_trait;
     use uuid::Uuid;
-
-    use crate::model::{Todo, TodoCreate, TodoUpdate};
 
     use self::error::Error;
 
@@ -176,83 +170,116 @@ mod database {
         }
     }
 
-    type Result<T> = std::result::Result<T, Error>;
-
-    #[derive(Debug, Clone)]
-    pub struct TodoRepo {
-        pub db: Arc<RwLock<HashMap<Uuid, Todo>>>,
-    }
-
-    impl TodoRepo {
-        pub fn new() -> Self {
-            Self { db: Arc::default() }
-        }
-    }
+    pub type Result<T> = std::result::Result<T, Error>;
 
     #[async_trait]
-    pub trait Repo {
-        async fn find_all(&self) -> Result<Vec<Todo>>;
-        async fn find(&self, id: Uuid) -> Result<Todo>;
-        async fn create(&mut self, dto: TodoCreate) -> Result<Uuid>;
+    pub trait Repo<T, C, U> {
+        async fn find_all(&self) -> Result<Vec<T>>;
+        async fn find(&self, id: Uuid) -> Result<T>;
+        async fn create(&mut self, dto: C) -> Result<Uuid>;
         async fn delete(&mut self, id: Uuid) -> Result<()>;
-        async fn update(&mut self, id: Uuid, dto: TodoUpdate) -> Result<Todo>;
+        async fn update(&mut self, id: Uuid, dto: U) -> Result<T>;
     }
 
-    #[async_trait]
-    impl Repo for TodoRepo {
-        async fn find(&self, id: Uuid) -> Result<Todo> {
-            let todos = self.db.read().unwrap(); // FIXME: say no to unwrap!!
-            let todo = todos.get(&id);
+    pub mod todo {
+        use std::{
+            collections::HashMap,
+            sync::{Arc, RwLock},
+        };
 
-            match todo {
-                Some(todo) => Ok(todo.clone()),
-                None => Err(Error::NotFound),
+        use axum::async_trait;
+        use uuid::Uuid;
+
+        use crate::model::{Todo, TodoCreate, TodoUpdate};
+
+        use super::{Error, Repo, Result};
+
+        #[derive(Debug, Clone)]
+        pub struct TodoRepo {
+            db: Arc<RwLock<HashMap<Uuid, Todo>>>,
+        }
+
+        impl TodoRepo {
+            pub fn new() -> Self {
+                Self { db: Arc::default() }
             }
         }
 
-        async fn find_all(&self) -> Result<Vec<Todo>> {
-            let todos = self.db.read().unwrap(); // FIXME: say no to unwrap!!
-            let todos = todos.values().cloned().collect::<Vec<_>>();
+        #[async_trait]
+        impl Repo<Todo, TodoCreate, TodoUpdate> for TodoRepo {
+            async fn find(&self, id: Uuid) -> Result<Todo> {
+                let todos = self.db.read().unwrap(); // FIXME: say no to unwrap!!
+                let todo = todos.get(&id);
 
-            Ok(todos)
-        }
-
-        async fn create(&mut self, dto: TodoCreate) -> Result<Uuid> {
-            let todo: Todo = dto.try_into()?;
-            let id = todo.id;
-
-            let mut todos = self.db.write().unwrap(); // FIXME: say no to unwrap!!
-            todos.insert(id, todo);
-
-            Ok(id)
-        }
-
-        async fn delete(&mut self, id: Uuid) -> Result<()> {
-            let mut todos = self.db.write().unwrap();
-
-            match todos.remove(&id).is_some() {
-                true => Ok(()),
-                false => Err(Error::NotFound),
-            }
-        }
-
-        async fn update(&mut self, id: Uuid, dto: TodoUpdate) -> Result<Todo> {
-            let mut todo = self.find(id).await?;
-
-            if let Some(text) = dto.text {
-                // TODO: I need to check if this catches EmtpyText too? Probs not
-                todo.text = text;
+                match todo {
+                    Some(todo) => Ok(todo.clone()),
+                    None => Err(Error::NotFound),
+                }
             }
 
-            if let Some(completed) = dto.completed {
-                todo.completed = completed;
+            async fn find_all(&self) -> Result<Vec<Todo>> {
+                let todos = self.db.read().unwrap(); // FIXME: say no to unwrap!!
+                let todos = todos.values().cloned().collect::<Vec<_>>();
+
+                Ok(todos)
             }
 
-            let mut todos = self.db.write().unwrap(); // FIXME: say no to unwrap!!
+            async fn create(&mut self, dto: TodoCreate) -> Result<Uuid> {
+                let todo: Todo = dto.try_into()?;
+                let id = todo.id;
 
-            todos.insert(todo.id, todo.clone());
+                let mut todos = self.db.write().unwrap(); // FIXME: say no to unwrap!!
+                todos.insert(id, todo);
 
-            Ok(todo)
+                Ok(id)
+            }
+
+            async fn delete(&mut self, id: Uuid) -> Result<()> {
+                let mut todos = self.db.write().unwrap();
+
+                match todos.remove(&id).is_some() {
+                    true => Ok(()),
+                    false => Err(Error::NotFound),
+                }
+            }
+
+            async fn update(&mut self, id: Uuid, dto: TodoUpdate) -> Result<Todo> {
+                let mut todo = self.find(id).await?;
+
+                if let Some(text) = dto.text {
+                    todo.text = text;
+                }
+
+                if let Some(completed) = dto.completed {
+                    todo.completed = completed;
+                }
+
+                let mut todos = self.db.write().unwrap(); // FIXME: say no to unwrap!!
+
+                todos.insert(todo.id, todo.clone());
+
+                Ok(todo)
+            }
+        }
+    }
+
+    #[cfg(test)]
+    mod test {
+        use crate::model::TodoCreate;
+
+        use super::{todo::TodoRepo, Repo, Result};
+
+        #[tokio::test]
+        async fn repo_create() -> Result<()> {
+            let mut repo = TodoRepo::new();
+
+            let dto = TodoCreate {
+                text: "My todo item".to_string(),
+            };
+
+            repo.create(dto).await?;
+
+            Ok(())
         }
     }
 }
@@ -267,7 +294,7 @@ mod handler {
     use uuid::Uuid;
 
     use crate::{
-        database::{Repo, TodoRepo},
+        database::{todo::TodoRepo, Repo},
         model::{Todo, TodoCreate, TodoUpdate},
     };
 
