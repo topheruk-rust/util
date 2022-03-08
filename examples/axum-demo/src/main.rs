@@ -1,8 +1,8 @@
 use std::net::SocketAddr;
 
 use axum::{extract::Extension, routing::get, Router, Server};
-use database::todo::TodoRepo;
-use handler::*;
+use database::{client, movie::MovieRepo, todo::TodoRepo};
+use handler::{movies_index, todos_create, todos_delete, todos_index, todos_member, todos_update};
 
 pub mod error {
     use axum::{
@@ -32,15 +32,26 @@ pub mod error {
         fn into_response(self) -> Response {
             let (code, message) = match self {
                 // TODO: find a better way of handling this
-                Error::Database(DbError::Model(ModelError::EmptyText)) => {
-                    (StatusCode::BAD_REQUEST, "text field is emtpy".to_string())
-                }
                 Error::Database(DbError::NotFound) => {
                     (StatusCode::NOT_FOUND, "not found".to_string())
                 }
-                Error::Database(DbError::Model(ModelError::Encoding(e))) => {
+                Error::Database(DbError::Mongo(e)) => (StatusCode::NOT_FOUND, e.to_string()),
+                Error::Database(DbError::Model(ModelError::EmptyText)) => {
+                    (StatusCode::BAD_REQUEST, "text field is empty".to_string())
+                }
+                Error::Database(DbError::Model(ModelError::BsonSerialize(e))) => {
                     (StatusCode::BAD_REQUEST, e.to_string())
                 }
+                Error::Database(DbError::Model(ModelError::BsonDeserialize(e))) => {
+                    (StatusCode::BAD_REQUEST, e.to_string())
+                }
+                Error::Database(DbError::Model(ModelError::Serde(e))) => {
+                    (StatusCode::BAD_REQUEST, e.to_string())
+                }
+                Error::Database(DbError::Deserialize(e)) => {
+                    (StatusCode::BAD_REQUEST, e.to_string())
+                }
+                Error::Database(DbError::Serialize(e)) => (StatusCode::BAD_REQUEST, e.to_string()),
             };
 
             let body = Json(json!({ "error": message }));
@@ -50,74 +61,135 @@ pub mod error {
     }
 }
 
-mod model {
-    use serde::{Deserialize, Serialize};
-    use uuid::Uuid;
-
+pub mod model {
     use self::error::Error;
 
-    pub(crate) mod error {
+    pub mod error {
         #[derive(Debug)]
         pub enum Error {
-            Encoding(serde_json::Error),
+            Serde(serde_json::Error),
             EmptyText,
+            BsonSerialize(bson::ser::Error),
+            BsonDeserialize(bson::de::Error),
         }
 
         impl From<serde_json::Error> for Error {
             fn from(e: serde_json::Error) -> Self {
-                Self::Encoding(e)
+                Self::Serde(e)
+            }
+        }
+
+        impl From<bson::ser::Error> for Error {
+            fn from(e: bson::ser::Error) -> Self {
+                Self::BsonSerialize(e)
+            }
+        }
+
+        impl From<bson::de::Error> for Error {
+            fn from(e: bson::de::Error) -> Self {
+                Self::BsonDeserialize(e)
             }
         }
     }
 
     type Result<T> = std::result::Result<T, Error>;
 
-    #[derive(Debug, Serialize, Clone)]
-    pub struct Todo {
-        pub id: Uuid,
-        pub text: String,
-        pub completed: bool,
+    pub mod todo {
+        use serde::{Deserialize, Serialize};
+        use uuid::Uuid;
+
+        use crate::model::error::Error;
+        use crate::model::Result;
+
+        #[derive(Debug, Serialize, Clone)]
+        pub struct Todo {
+            pub id: Uuid,
+            pub text: String,
+            pub completed: bool,
+        }
+
+        impl Todo {
+            // TODO:  what if empty string
+            // non lic should prevent this being an issue
+            fn new(text: String) -> Self {
+                Self {
+                    id: Uuid::new_v4(),
+                    text,
+                    completed: false,
+                }
+            }
+        }
+
+        impl TryFrom<TodoCreate> for Todo {
+            type Error = Error;
+
+            fn try_from(value: TodoCreate) -> Result<Self> {
+                let TodoCreate { text } = match value {
+                    _ if value.text.is_empty() => Err(Error::EmptyText),
+                    _ => Ok(value),
+                }?;
+
+                Ok(Todo::new(text))
+            }
+        }
+
+        #[derive(Debug, Deserialize)]
+        pub struct TodoUpdate {
+            pub text: Option<String>,
+            pub completed: Option<bool>,
+        }
+
+        #[derive(Debug, Deserialize)]
+        pub struct TodoCreate {
+            pub text: String,
+        }
     }
 
-    impl Todo {
-        // TODO:  what if empty string
-        // non public should prevent this being an issue
-        fn new(text: String) -> Self {
-            Self {
-                id: Uuid::new_v4(),
-                text,
-                completed: false,
+    pub mod movie {
+        use std::fmt;
+
+        // use chrono::Utc;
+        use mongodb::bson::oid::ObjectId;
+        use serde::{Deserialize, Serialize};
+
+        // You use `serde` to create structs which can serialize & deserialize between BSON:
+        #[derive(Serialize, Deserialize, Debug, Clone)]
+        pub struct Movie {
+            #[serde(rename = "_id", skip_serializing_if = "Option::is_none")]
+            pub id: Option<ObjectId>,
+            pub title: String,
+            // pub year: i64, // FIXME: invalid type
+            pub plot: Option<String>,
+            // #[serde(with = "bson::serde_helpers::chrono_datetime_as_bson_datetime")]
+            // pub released: chrono::DateTime<Utc>, // FIXME: does not work
+        }
+
+        #[derive(Deserialize)]
+        pub struct MovieSummary {
+            pub title: String,
+            pub cast: Vec<String>,
+            pub year: i32,
+        }
+
+        impl fmt::Display for MovieSummary {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                write!(
+                    f,
+                    "{}, {}, {}",
+                    self.title,
+                    self.cast.get(0).unwrap_or(&"- no cast -".to_owned()),
+                    self.year
+                )
             }
         }
     }
 
-    impl TryFrom<TodoCreate> for Todo {
-        type Error = Error;
-
-        fn try_from(value: TodoCreate) -> Result<Self> {
-            let TodoCreate { text } = match value {
-                _ if value.text.is_empty() => Err(Error::EmptyText),
-                _ => Ok(value),
-            }?;
-
-            Ok(Todo::new(text))
-        }
-    }
-
-    #[derive(Debug, Deserialize)]
-    pub struct TodoUpdate {
-        pub text: Option<String>,
-        pub completed: Option<bool>,
-    }
-
-    #[derive(Debug, Deserialize)]
-    pub struct TodoCreate {
-        pub text: String,
-    }
-
     #[cfg(test)]
-    mod test {
-        use super::*;
+    pub mod test {
+        use crate::model::{
+            todo::{Todo, TodoCreate},
+            Result,
+        };
 
         macro_rules! test_todo_create {
             ($name:ident, $str:expr) => {
@@ -148,8 +220,12 @@ mod model {
     }
 }
 
-mod database {
+pub mod database {
     use axum::async_trait;
+    use mongodb::{
+        options::{ClientOptions, ResolverConfig},
+        Client,
+    };
     use uuid::Uuid;
 
     use self::error::Error;
@@ -161,6 +237,9 @@ mod database {
         pub enum Error {
             NotFound,
             Model(ModelError),
+            Mongo(mongodb::error::Error),
+            Serialize(bson::ser::Error),
+            Deserialize(bson::de::Error),
         }
 
         impl From<ModelError> for Error {
@@ -168,9 +247,40 @@ mod database {
                 Self::Model(e)
             }
         }
+
+        impl From<mongodb::error::Error> for Error {
+            fn from(err: mongodb::error::Error) -> Self {
+                Self::Mongo(err)
+            }
+        }
+
+        impl From<bson::ser::Error> for Error {
+            fn from(e: bson::ser::Error) -> Self {
+                Self::Serialize(e)
+            }
+        }
+
+        impl From<bson::de::Error> for Error {
+            fn from(e: bson::de::Error) -> Self {
+                Self::Deserialize(e)
+            }
+        }
     }
 
-    pub type Result<T> = std::result::Result<T, Error>;
+    type Result<T> = std::result::Result<T, Error>;
+
+    pub async fn client() -> Result<Client> {
+        let client_uri =
+            "mongodb+srv://topheruk:VsNSZ28UcbGYJhw2@cluster0.pkfdw.mongodb.net/local?retryWrites=true&w=majority";
+
+        let options =
+            ClientOptions::parse_with_resolver_config(&client_uri, ResolverConfig::cloudflare())
+                .await?;
+
+        let cli = Client::with_options(options)?;
+
+        Ok(cli)
+    }
 
     #[async_trait]
     pub trait Repo<T, C, U> {
@@ -182,19 +292,61 @@ mod database {
     }
 
     pub mod movie {
-        use bson::Document;
-        use mongodb::Collection;
+        use bson::{doc, oid::ObjectId, Document};
+        use futures::TryStreamExt;
+        use mongodb::{options::AggregateOptions, Collection};
 
+        use crate::model::movie::Movie;
+
+        use super::Result;
+
+        #[derive(Debug, Clone)]
         pub struct MovieRepo {
-            db: Collection<Document>,
+            db: Collection<Movie>,
+            // options
+        }
+
+        impl From<mongodb::Client> for MovieRepo {
+            fn from(cli: mongodb::Client) -> Self {
+                Self {
+                    db: cli.database("sample_mflix").collection("movies"),
+                }
+            }
         }
 
         impl MovieRepo {
-            pub fn new(db: mongodb::Database) -> Self {
-                Self {
-                    db: db.collection_with_options(),
+            pub async fn find(
+                &self,
+                pipeline: impl IntoIterator<Item = Document>,
+            ) -> Result<Vec<Movie>> {
+                // TODO: check why this fails when using find<Type>
+
+                let mut cur = self.db.aggregate(pipeline, None).await?;
+
+                let mut result = vec![];
+                while let Some(doc) = cur.try_next().await? {
+                    let movie: Movie = bson::from_document(doc)?;
+                    result.push(movie)
                 }
+
+                Ok(result)
             }
+
+            pub async fn find_one(&self, doc: Document) -> Result<Option<Movie>> {
+                let movie = self.db.find_one(Some(doc), None).await?;
+
+                Ok(movie)
+            }
+
+            pub async fn insert_one(&mut self, movie: Movie) -> Result<Option<ObjectId>> {
+                let result = self.db.insert_one(movie, None).await?;
+                let id = result.inserted_id.as_object_id();
+
+                Ok(id)
+            }
+
+            // pub async fn delete(&mut self, id: Uuid) -> Result<()>;
+            // pub async fn update(&mut self, id: Uuid, dto: U) -> Result<T>;
         }
     }
 
@@ -207,9 +359,10 @@ mod database {
         use axum::async_trait;
         use uuid::Uuid;
 
-        use crate::model::{Todo, TodoCreate, TodoUpdate};
-
-        use super::{Error, Repo, Result};
+        use crate::{
+            database::{Error, Repo, Result},
+            model::todo::{Todo, TodoCreate, TodoUpdate},
+        };
 
         #[derive(Debug, Clone)]
         pub struct TodoRepo {
@@ -281,13 +434,19 @@ mod database {
     }
 
     #[cfg(test)]
-    mod test {
-        use crate::model::TodoCreate;
+    pub mod test {
+        use bson::{doc, Document};
+        use futures::{StreamExt, TryStreamExt};
 
-        use super::{todo::TodoRepo, Repo, Result};
+        use crate::{
+            database::client,
+            model::{movie::Movie, todo::TodoCreate},
+        };
+
+        use super::{movie::MovieRepo, todo::TodoRepo, Repo, Result};
 
         #[tokio::test]
-        async fn repo_create() -> Result<()> {
+        async fn todo_repo_create() -> Result<()> {
             let mut repo = TodoRepo::new();
 
             let dto = TodoCreate {
@@ -298,21 +457,76 @@ mod database {
 
             Ok(())
         }
+
+        #[tokio::test]
+        async fn movie_repo_ping() -> Result<()> {
+            // TODO: change this to Client::default()
+            let client = client().await?;
+
+            client
+                .database("admin")
+                .run_command(doc! {"ping": 1}, None)
+                .await?;
+            println!("Connected successfully.");
+
+            Ok(())
+        }
+
+        #[tokio::test]
+        async fn movie_repo_find() -> Result<()> {
+            let repo = MovieRepo::from(client().await?);
+
+            if let Some(movie) = repo.find_one(doc! {"title":"One Week"}).await? {
+                println!("{:?}", movie.plot);
+            }
+
+            Ok(())
+        }
+
+        #[tokio::test]
+        async fn movie_repo_find_all() -> Result<()> {
+            let repo = MovieRepo::from(client().await?);
+            let movies = repo.find(None).await?;
+
+            println!("{:?}", movies.len());
+            Ok(())
+        }
+
+        #[tokio::test]
+        async fn movie_repo_insert_one() -> Result<()> {
+            let mut repo = MovieRepo::from(client().await?);
+
+            let dto = Movie {
+                id: None,
+                title: "Parasite".to_string(),
+                plot: Some("A poor family, the Kims, con their way into becoming the servants of a rich family, the Parks. But their easy life gets complicated when their deception is threatened with exposure.".to_string()) 
+            };
+
+            let id = repo.insert_one(dto).await?;
+
+            assert_ne!(id, None);
+            Ok(())
+        }
     }
 }
 
-mod handler {
+pub mod handler {
     use axum::{
-        extract::{Extension, Path},
+        extract::{Extension, Path, Query},
         http::StatusCode,
         Json,
     };
+    use bson::doc;
+    use serde::Deserialize;
     use serde_json::{json, Value};
     use uuid::Uuid;
 
     use crate::{
-        database::{todo::TodoRepo, Repo},
-        model::{Todo, TodoCreate, TodoUpdate},
+        database::{movie::MovieRepo, todo::TodoRepo, Repo},
+        model::{
+            movie::Movie,
+            todo::{Todo, TodoCreate, TodoUpdate},
+        },
     };
 
     use crate::error::Result;
@@ -359,18 +573,46 @@ mod handler {
 
         Ok(StatusCode::NO_CONTENT)
     }
+
+    // -- movies
+
+    #[derive(Debug, Deserialize, Default)]
+    pub struct Pagination {
+        pub offset: Option<u32>,
+        pub limit: Option<u32>,
+    }
+
+    pub async fn movies_index(
+        pagination: Option<Query<Pagination>>,
+        Extension(repo): Extension<MovieRepo>,
+    ) -> Result<Json<Vec<Movie>>> {
+        let Query(Pagination { offset, limit }) = pagination.unwrap_or_default();
+
+        let skip = offset.unwrap_or(0);
+        let stage_skip = doc! { "$skip": skip };
+
+        let limit = limit.unwrap_or(20);
+        let stage_limit = doc! { "$limit": limit };
+
+        let todos = repo.find(vec![stage_skip, stage_limit]).await?;
+        Ok(Json(todos))
+    }
 }
 
-fn app() -> Router {
-    let repo = TodoRepo::new();
+// #[tokio::as]
+async fn app() -> Router {
+    let todos = TodoRepo::new();
+    let movies = MovieRepo::from(client().await.unwrap());
 
     Router::new()
+        .route("/movies/", get(movies_index))
         .route("/todos/", get(todos_index).post(todos_create))
         .route(
             "/todos/:id",
             get(todos_member).patch(todos_update).delete(todos_delete),
         )
-        .layer(Extension(repo))
+        .layer(Extension(movies))
+        .layer(Extension(todos))
 }
 
 #[tokio::main]
@@ -380,13 +622,13 @@ async fn main() {
     let addr = &SocketAddr::from(([127, 0, 0, 1], 3000));
 
     Server::bind(addr)
-        .serve(app.into_make_service())
+        .serve(app.await.into_make_service())
         .await
         .unwrap();
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
     use axum::http::{header, Method, Request, StatusCode};
     use serde_json::json;
@@ -404,7 +646,7 @@ mod tests {
                     .body(serde_json::to_vec(&$json).unwrap().into())
                     .unwrap();
 
-                let res = app.oneshot(req).await.unwrap();
+                let res = app.await.oneshot(req).await.unwrap();
                 assert_eq!(res.status(), $status_code);
             }
         };

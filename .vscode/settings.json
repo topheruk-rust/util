@@ -1,6 +1,10 @@
 {
     "cSpell.words": [
         "actix",
+        "bson",
+        "chrono",
+        "datetime",
+        "mflix",
         "oneshot",
         "todos"
     ]
