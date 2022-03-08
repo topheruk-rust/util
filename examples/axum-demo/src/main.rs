@@ -15,6 +15,7 @@ pub mod error {
     use crate::database::error::Error as DbError;
     use crate::model::error::Error as ModelError;
 
+    #[derive(Debug)]
     pub enum Error {
         Database(DbError),
     }
@@ -30,6 +31,7 @@ pub mod error {
     impl IntoResponse for Error {
         fn into_response(self) -> Response {
             let (code, message) = match self {
+                // TODO: find a better way of handling this
                 Error::Database(DbError::Model(ModelError::EmptyText)) => {
                     (StatusCode::BAD_REQUEST, "text field is emtpy".to_string())
                 }
@@ -161,6 +163,7 @@ mod database {
     pub mod error {
         use crate::model::error::Error as ModelError;
 
+        #[derive(Debug)]
         pub enum Error {
             NotFound,
             Model(ModelError),
