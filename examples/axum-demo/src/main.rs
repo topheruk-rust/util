@@ -1,8 +1,8 @@
 use std::net::SocketAddr;
 
 use axum::{extract::Extension, routing::get, Router, Server};
+use database::TodoRepo;
 use handler::*;
-use model::TodoRepo;
 
 pub mod error {
     use axum::{
@@ -12,30 +12,33 @@ pub mod error {
     };
     use serde_json::json;
 
+    use crate::database::error::Error as DbError;
     use crate::model::error::Error as ModelError;
 
     pub enum Error {
-        Model(ModelError),
+        Database(DbError),
     }
 
     pub type Result<T> = std::result::Result<T, Error>;
 
-    impl From<ModelError> for Error {
-        fn from(e: ModelError) -> Self {
-            Self::Model(e)
+    impl From<DbError> for Error {
+        fn from(e: DbError) -> Self {
+            Self::Database(e)
         }
     }
 
     impl IntoResponse for Error {
         fn into_response(self) -> Response {
             let (code, message) = match self {
-                Error::Model(ModelError::EmptyText) => {
+                Error::Database(DbError::Model(ModelError::EmptyText)) => {
                     (StatusCode::BAD_REQUEST, "text field is emtpy".to_string())
                 }
-                Error::Model(ModelError::NotFound) => {
+                Error::Database(DbError::NotFound) => {
                     (StatusCode::NOT_FOUND, "not found".to_string())
                 }
-                Error::Model(ModelError::Encoding(e)) => (StatusCode::BAD_REQUEST, e.to_string()),
+                Error::Database(DbError::Model(ModelError::Encoding(e))) => {
+                    (StatusCode::BAD_REQUEST, e.to_string())
+                }
             };
 
             let body = Json(json!({ "error": message }));
@@ -46,12 +49,6 @@ pub mod error {
 }
 
 mod model {
-    use std::{
-        collections::HashMap,
-        sync::{Arc, RwLock},
-    };
-
-    use axum::async_trait;
     use serde::{Deserialize, Serialize};
     use uuid::Uuid;
 
@@ -61,9 +58,7 @@ mod model {
         #[derive(Debug)]
         pub enum Error {
             Encoding(serde_json::Error),
-            // RwLockReadGuard Error
             EmptyText,
-            NotFound,
         }
 
         impl From<serde_json::Error> for Error {
@@ -92,10 +87,6 @@ mod model {
                 completed: false,
             }
         }
-
-        pub fn default() -> Self {
-            Self::new("todo".to_string())
-        }
     }
 
     impl TryFrom<TodoCreate> for Todo {
@@ -120,6 +111,69 @@ mod model {
     pub struct TodoCreate {
         pub text: String,
     }
+
+    #[cfg(test)]
+    mod test {
+        use super::*;
+
+        macro_rules! test_todo_create {
+            ($name:ident, $str:expr) => {
+                #[test]
+                fn $name() {
+                    let t = TodoCreate {
+                        text: $str.to_string(),
+                    };
+
+                    match t.try_into() as Result<Todo> {
+                        Ok(t) => assert_eq!(t.completed, false),
+                        Err(_) => assert!(true), // Err(e) => assert_eq!(e, error::Error::EmptyText),
+                    };
+                }
+            };
+        }
+
+        test_todo_create!(todo_create_todo_ok, "John");
+        test_todo_create!(test_create_todo_err, "");
+
+        #[test]
+        fn test_todo_json() -> Result<()> {
+            let t = serde_json::from_str::<TodoCreate>(r#"{"text":"Hello, World"}"#)?;
+            let t: Todo = t.try_into()?;
+            assert_eq!(t.completed, false);
+            Ok(())
+        }
+    }
+}
+
+mod database {
+    use std::{
+        collections::HashMap,
+        sync::{Arc, RwLock},
+    };
+
+    use axum::async_trait;
+    use uuid::Uuid;
+
+    use crate::model::{Todo, TodoCreate, TodoUpdate};
+
+    use self::error::Error;
+
+    pub mod error {
+        use crate::model::error::Error as ModelError;
+
+        pub enum Error {
+            NotFound,
+            Model(ModelError),
+        }
+
+        impl From<ModelError> for Error {
+            fn from(e: ModelError) -> Self {
+                Self::Model(e)
+            }
+        }
+    }
+
+    type Result<T> = std::result::Result<T, Error>;
 
     #[derive(Debug, Clone)]
     pub struct TodoRepo {
@@ -161,7 +215,7 @@ mod model {
         }
 
         async fn create(&mut self, dto: TodoCreate) -> Result<Uuid> {
-            let todo: Todo = dto.try_into()?; // FIXME: say no to unwrap!!
+            let todo: Todo = dto.try_into()?;
             let id = todo.id;
 
             let mut todos = self.db.write().unwrap(); // FIXME: say no to unwrap!!
@@ -198,38 +252,6 @@ mod model {
             Ok(todo)
         }
     }
-
-    #[cfg(test)]
-    mod test {
-        use super::*;
-
-        macro_rules! test_todo_create {
-            ($name:ident, $str:expr) => {
-                #[test]
-                fn $name() {
-                    let t = TodoCreate {
-                        text: $str.to_string(),
-                    };
-
-                    match t.try_into() as Result<Todo> {
-                        Ok(t) => assert_eq!(t.completed, false),
-                        Err(_) => assert!(true), // Err(e) => assert_eq!(e, error::Error::EmptyText),
-                    };
-                }
-            };
-        }
-
-        test_todo_create!(todo_create_todo_ok, "John");
-        test_todo_create!(test_create_todo_err, "");
-
-        #[test]
-        fn test_todo_json() -> Result<()> {
-            let t = serde_json::from_str::<TodoCreate>(r#"{"text":"Hello, World"}"#)?;
-            let t: Todo = t.try_into()?;
-            assert_eq!(t.completed, false);
-            Ok(())
-        }
-    }
 }
 
 mod handler {
@@ -241,7 +263,10 @@ mod handler {
     use serde_json::{json, Value};
     use uuid::Uuid;
 
-    use crate::model::{Repo, Todo, TodoCreate, TodoRepo, TodoUpdate};
+    use crate::{
+        database::{Repo, TodoRepo},
+        model::{Todo, TodoCreate, TodoUpdate},
+    };
 
     use crate::error::Result;
 
@@ -341,7 +366,7 @@ mod tests {
     test_post!(
         case_created,
         "/todos/",
-        json!({"text":"Hello, World!"}),
-        StatusCode::CREATED
+        json!({"text":""}),
+        StatusCode::BAD_REQUEST
     );
 }
