@@ -1,6 +1,3 @@
 [workspace]
 
-members = [
-  "examples/*",
-  "packages/*",
-]
+members = ["examples/*", "examples/net/rest/axum", "packages/*"]

@@ -4,6 +4,11 @@ use axum::{extract::Extension, routing::get, Router, Server};
 use database::{client, movie::MovieRepo, todo::TodoRepo};
 use handler::{movies_index, todos_create, todos_delete, todos_index, todos_member, todos_update};
 
+// some possible visibility restrictions are:
+// `pub(crate)`: visible only on the current crate
+// `pub(super)`: visible only in the current module's parent
+// `pub(in path::to::module)`: visible only on the specified path
+
 pub mod error {
     use axum::{
         http::StatusCode,
@@ -64,7 +69,7 @@ pub mod error {
 pub mod model {
     use self::error::Error;
 
-    pub mod error {
+    pub(super) mod error {
         #[derive(Debug)]
         pub enum Error {
             Serde(serde_json::Error),
@@ -94,7 +99,7 @@ pub mod model {
 
     type Result<T> = std::result::Result<T, Error>;
 
-    pub mod todo {
+    pub(super) mod todo {
         use serde::{Deserialize, Serialize};
         use uuid::Uuid;
 
@@ -145,7 +150,7 @@ pub mod model {
         }
     }
 
-    pub mod movie {
+    pub(super) mod movie {
         use std::fmt;
 
         // use chrono::Utc;
@@ -185,7 +190,7 @@ pub mod model {
     }
 
     #[cfg(test)]
-    pub mod test {
+    mod test {
         use crate::model::{
             todo::{Todo, TodoCreate},
             Result,
@@ -230,7 +235,7 @@ pub mod database {
 
     use self::error::Error;
 
-    pub mod error {
+    pub(super) mod error {
         use crate::model::error::Error as ModelError;
 
         #[derive(Debug)]
@@ -283,7 +288,7 @@ pub mod database {
     }
 
     #[async_trait]
-    pub trait Repo<T, C, U> {
+    pub(super) trait Repo<T, C, U> {
         async fn find_all(&self) -> Result<Vec<T>>;
         async fn find(&self, id: Uuid) -> Result<T>;
         async fn create(&mut self, dto: C) -> Result<Uuid>;
@@ -292,9 +297,9 @@ pub mod database {
     }
 
     pub mod movie {
-        use bson::{doc, oid::ObjectId, Document};
+        use bson::{oid::ObjectId, Document};
         use futures::TryStreamExt;
-        use mongodb::{options::AggregateOptions, Collection};
+        use mongodb::Collection;
 
         use crate::model::movie::Movie;
 
@@ -434,9 +439,8 @@ pub mod database {
     }
 
     #[cfg(test)]
-    pub mod test {
-        use bson::{doc, Document};
-        use futures::{StreamExt, TryStreamExt};
+    mod test {
+        use bson::doc;
 
         use crate::{
             database::client,
