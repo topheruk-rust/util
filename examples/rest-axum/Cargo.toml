@@ -1,5 +1,5 @@
 [package]
-name = "axum-demo"
+name = "rest-axum"
 version = "0.1.0"
 edition = "2021"
 
@@ -8,7 +8,9 @@ edition = "2021"
 [dependencies]
 axum = "0.4.8"
 axum-extra = { version = "0.1.5", features = ["typed-routing"] }
-bson = { version = "2", features = ["chrono-0_4"] } # Needed for using chrono datetime in doc
+bson = { version = "2", features = [
+    "chrono-0_4",
+] } # Needed for using chrono datetime in doc
 chrono = "0.4" # Used for setting DateTimes
 futures = "0.3.13"
 hyper = { version = "0.14", features = ["full"] }

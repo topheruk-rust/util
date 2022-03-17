@@ -1,3 +1,8 @@
 [workspace]
 
-members = ["examples/*", "examples/net/rest/axum", "packages/*"]
+members = [
+    "examples/adder",
+    "examples/demo-mongodb",
+    "examples/rest-axum",
+    "packages/*",
+]
