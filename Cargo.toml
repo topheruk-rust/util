@@ -1,8 +1,3 @@
 [workspace]
 
-members = [
-    "examples/adder",
-    "examples/demo-mongodb",
-    "examples/rest-axum",
-    "packages/*",
-]
+members = ["core"]
