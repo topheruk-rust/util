@@ -1,3 +1,5 @@
+pub mod collections;
+
 mod tests {
     #[test]
     fn it_works() {
